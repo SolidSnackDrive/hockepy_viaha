@@ -1,14 +1,14 @@
 import functools
+import os
 import re
 import requests
 import csv
 import sys
 from datetime import time, timedelta
 
-gameId = sys.argv[1]
-headers = {'authorization' : 'API-Key f75fa549e81421f19dc929bc91f88820b6d09421'}
-apiUrl = "https://api.hisports.app/api/games/{}/boxScore".format(gameId)
-response = requests.get(apiUrl, headers=headers )
+import argparse
+
+
 #print(response.json())
 
 class event_type:
@@ -80,14 +80,14 @@ def obtainGoalCode(dict):
     else:
         return 'REG'
 
-with open("game-{}.csv".format(gameId), 'w+') as hockey_csv:
+
+def writeGameToFile(hockey_csv, response, date):
     rj = response.json()
     idTeamName = {}
     out_writer = csv.writer(hockey_csv)
     for team in rj['teams']:
         idTeamName[team['id']] = team['name']
     teamNames = list(idTeamName.values())
-    out_writer.writerow(['Home Team', 'Away Team', 'Event', 'Event Type', 'Player Name', 'Player Number', 'Player Team', 'Start Time', 'End Time', 'Period', 'Penalty Mins', 'Score'])
     scores = score_track()
     for goal in rj['goals']:
         scores.add_score(game_event(goal['teamId'], idTeamName[goal['teamId']], collectGameTime(goal['gameTime']), collectGameTime(goal['gameTime']), goal['gameTime']['period'], goal['participant']['fullName'], goal['participant']['number'], event_type.GOAL, 0, obtainGoalCode(goal)))
@@ -112,10 +112,59 @@ with open("game-{}.csv".format(gameId), 'w+') as hockey_csv:
     
     for score in scores.scores_:
         if score.event_type == event_type.GOAL:
-            out_writer.writerow([teamNames[0], teamNames[1], 'GOAL', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, 0, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
+            out_writer.writerow([teamNames[0], teamNames[1], date, 'GOAL', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, 0, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
     
         if score.event_type == event_type.ASSIST:
-            out_writer.writerow([teamNames[0], teamNames[1], 'ASSIST', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, 0, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
+            out_writer.writerow([teamNames[0], teamNames[1], date, 'ASSIST', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, 0, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
 
         if score.event_type == event_type.PENALTY:
-            out_writer.writerow([teamNames[0], teamNames[1], 'PENALTY', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, score.penalty_duration, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
+            out_writer.writerow([teamNames[0], teamNames[1], date, 'PENALTY', score.event_subtype, score.participant, score.partNumber, score.name, score.start_time, score.end_time, score.period, score.penalty_duration, scores.score_str(score.period, score.start_time, teamNames[0], teamNames[1])])
+
+def main():
+    parser = argparse.ArgumentParser('Collect data from VIAHA webpage and dump to csv spreadsheets.')
+    parser.add_argument('-s','--separate', dest='separate', action='store_const', const=True, default=False, help='If enabled, games will be split into separate files.')
+    parser.add_argument('scheduleId', type=int, nargs='?', help='Provide the ID of the schedule for the games you want to collect.')
+    parser.add_argument('teamId', type=int, nargs='?', help='Provide the team you are interested in from the provided schedule')
+
+    args=parser.parse_args()
+
+    if args.scheduleId is None or args.teamId is None:
+        raise Exception('Cannot run script without a schedule and team ID')
+
+    gameId = sys.argv[1]
+    scheduleUrl = 'https://api.hisports.app/api/games'
+    paramStr = '?filter={{"where":{{"and":[{{"scheduleId":{}}},{{"or":[{{"homeTeamId":{}}},{{"awayTeamId":{}}}]}}]}},"include":["arena","schedule","group","teamStats"],"order":["startTime ASC","id DESC"],"limit":null,"skip":null}}'.format(args.scheduleId, args.teamId, args.teamId)
+    headers = {'authorization' : 'API-Key f75fa549e81421f19dc929bc91f88820b6d09421'}
+    sess = requests.Session()
+    req = requests.Request('GET', scheduleUrl, headers=headers)
+    prep = req.prepare()
+    prep.url += paramStr
+    resp = sess.send(prep)
+
+    collectfilename = 'games-season-{}.csv'.format(resp.json()[0]['seasonId'])
+    if args.separate == False:
+        if os.path.isfile(collectfilename):
+            os.remove(collectfilename)
+        with open(collectfilename, 'a') as file:
+            out_writer = csv.writer(file)
+            out_writer.writerow(['Home Team', 'Away Team', 'Date', 'Event', 'Event Type', 'Player Name', 'Player Number', 'Player Team', 'Start Time', 'End Time', 'Period', 'Penalty Mins', 'Score'])
+
+
+    for game in resp.json():
+        gameUrl = 'https://api.hisports.app/api/games/{}/boxScore'.format(game['id'])
+        req = requests.Request('GET', gameUrl, headers=headers)
+        resp = sess.send(req.prepare())
+        if args.separate:
+            with open('game-{}.csv'.format(game['date']), 'w+') as file:
+                out_writer = csv.writer(file)
+                out_writer.writerow(['Home Team', 'Away Team', 'Date', 'Event', 'Event Type', 'Player Name', 'Player Number', 'Player Team', 'Start Time', 'End Time', 'Period', 'Penalty Mins', 'Score'])
+                writeGameToFile(file, resp, game['date'])
+        else:
+            with open(collectfilename, 'a') as file:
+                writeGameToFile(file, resp, game['date'])
+        
+        
+
+
+if __name__ == '__main__':
+    main()
