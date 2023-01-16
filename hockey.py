@@ -141,7 +141,7 @@ def main():
     prep.url += paramStr
     resp = sess.send(prep)
 
-    collectfilename = 'games-season-{}.csv'.format(resp.json()[0]['seasonId'])
+    collectfilename = 'games-season-{}-{}-{}.csv'.format(resp.json()[0]['seasonId'], args.scheduleId, args.teamId)
     if args.separate == False:
         if os.path.isfile(collectfilename):
             os.remove(collectfilename)
@@ -155,7 +155,7 @@ def main():
         req = requests.Request('GET', gameUrl, headers=headers)
         resp = sess.send(req.prepare())
         if args.separate:
-            with open('game-{}.csv'.format(game['date']), 'w+') as file:
+            with open('game-{}-{}-{}.csv'.format(game['date'], args.scheduleId, args.teamId), 'w+') as file:
                 out_writer = csv.writer(file)
                 out_writer.writerow(['Home Team', 'Away Team', 'Date', 'Event', 'Event Type', 'Player Name', 'Player Number', 'Player Team', 'Start Time', 'End Time', 'Period', 'Penalty Mins', 'Score'])
                 writeGameToFile(file, resp, game['date'])
